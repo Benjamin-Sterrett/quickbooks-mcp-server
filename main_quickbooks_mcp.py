@@ -111,11 +111,17 @@ def {method_name}(**kwargs) -> types.TextContent:
         return types.TextContent(type='text', text="Error: QuickBooks session not initialized. Please check your credentials and restart the server.")
     
     # Workaround for clients that pass all arguments as a single string in 'kwargs'
+    # Supports URL-style query string format: "start_date=2025-12-01&end_date=2025-12-31"
     if 'kwargs' in kwargs and isinstance(kwargs['kwargs'], str) and '=' in kwargs['kwargs']:
         try:
-            key, value = kwargs['kwargs'].split('=', 1)
-            # Overwrite kwargs with the parsed arguments
-            kwargs = {{key: value}}
+            parsed_kwargs = {{}}
+            # Split by & to handle multiple parameters
+            for pair in kwargs['kwargs'].split('&'):
+                if '=' in pair:
+                    key, value = pair.split('=', 1)
+                    parsed_kwargs[key.strip()] = value.strip()
+            if parsed_kwargs:
+                kwargs = parsed_kwargs
         except Exception:
             # If parsing fails, do nothing and proceed with the original kwargs
             pass
