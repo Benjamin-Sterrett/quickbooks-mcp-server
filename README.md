@@ -34,6 +34,28 @@ QUICKBOOKS_ENV='sandbox' or 'production'
 
 **Note:** The `.env` file is automatically ignored by git for security reasons.
 
+### Token Persistence (macOS)
+
+QuickBooks rotates refresh tokens on every OAuth token exchange. This server automatically persists rotated tokens to **Apple Keychain** so they survive process restarts.
+
+- **Primary:** Reads from Keychain (service: `claude-workflow`, account: `quickbooks-refresh-token`)
+- **Fallback:** `QUICKBOOKS_REFRESH_TOKEN` env var (used only if Keychain entry is missing)
+- **On rotation:** New refresh token is written to Keychain automatically
+
+**Initial setup — seed the Keychain once:**
+```bash
+security add-generic-password -s claude-workflow -a quickbooks-refresh-token -w "YOUR_REFRESH_TOKEN" -U
+```
+
+After seeding, the server handles all future token rotations automatically. You should never need to manually update the token again.
+
+**Verify the stored token:**
+```bash
+security find-generic-password -s claude-workflow -a quickbooks-refresh-token -w
+```
+
+**If auth fails after a long period of inactivity** (token expired beyond the 100-day refresh window), re-authorize via the [OAuth 2.0 Playground](https://developer.intuit.com/app/developer/playground) and re-seed the Keychain with the new token.
+
 ## Step 1. Install uv:
    - MacOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh
    - Windows: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
