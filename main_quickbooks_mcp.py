@@ -110,21 +110,33 @@ def {method_name}(**kwargs) -> types.TextContent:
     if quickbooks is None:
         return types.TextContent(type='text', text="Error: QuickBooks session not initialized. Please check your credentials and restart the server.")
     
-    # Workaround for clients that pass all arguments as a single string in 'kwargs'
-    # Supports URL-style query string format: "start_date=2025-12-01&end_date=2025-12-31"
-    if 'kwargs' in kwargs and isinstance(kwargs['kwargs'], str) and '=' in kwargs['kwargs']:
-        try:
-            parsed_kwargs = {{}}
-            # Split by & to handle multiple parameters
-            for pair in kwargs['kwargs'].split('&'):
-                if '=' in pair:
-                    key, value = pair.split('=', 1)
-                    parsed_kwargs[key.strip()] = value.strip()
-            if parsed_kwargs:
-                kwargs = parsed_kwargs
-        except Exception:
-            # If parsing fails, do nothing and proceed with the original kwargs
-            pass
+    # Unwrap kwargs — Claude sends params nested inside a 'kwargs' key
+    # Handle three formats: dict, JSON string, or URL-style query string
+    if 'kwargs' in kwargs:
+        inner = kwargs['kwargs']
+        if isinstance(inner, dict):
+            # Direct dict passthrough (most common from Claude tool calls)
+            kwargs = inner
+        elif isinstance(inner, str):
+            # Try JSON first
+            try:
+                import json as _json
+                parsed = _json.loads(inner)
+                if isinstance(parsed, dict):
+                    kwargs = parsed
+            except (ValueError, TypeError):
+                # Fall back to URL-style query string: "key=value&key=value"
+                if '=' in inner:
+                    try:
+                        parsed_kwargs = {{}}
+                        for pair in inner.split('&'):
+                            if '=' in pair:
+                                key, value = pair.split('=', 1)
+                                parsed_kwargs[key.strip()] = value.strip()
+                        if parsed_kwargs:
+                            kwargs = parsed_kwargs
+                    except Exception:
+                        pass
 
     print(f"Executing '{method_name}' with arguments: {{kwargs}}", file=sys.stderr)
     
