@@ -1,7 +1,23 @@
 *.env
+.env
+.env.*
 *.pyc
 *.pyo
 *.pyd
 *.pyw
 *.pyz
 .python-version
+
+# Agent session artifacts — never commit
+.handoff.md
+.auto-resume.md
+.discovery-notes.md
+.implementation-plan.md
+.code-review-evidence.md
+.verification-evidence.md
+.audit-evidence.md
+.dw-state.json
+.claude/debug-state.json
+*-handoff.md
+
+# .debug-report.md is intentionally NOT ignored — it ships with fix/* PRs as evidence
