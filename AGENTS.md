@@ -33,3 +33,21 @@ End your review with one of:
 - Don't flag style issues unless they affect readability
 - Focus on what matters — a real bug beats ten naming suggestions
 - If the code is good, say so briefly and APPROVE
+
+## Review Output Format
+
+End EVERY code review with a structured verdict block:
+
+```
+VERDICT: APPROVE or REQUEST_CHANGES
+CONFIDENCE: 0.0-1.0
+JUSTIFICATION: 1-2 sentence summary
+```
+
+If findings exist, list them BEFORE the verdict using this format:
+```
+SEVERITY|FILE:LINE|ISSUE|RECOMMENDATION
+```
+
+Do NOT output narrative summaries. Do NOT skip the VERDICT line.
+Reference: ~/.claude/reference/codex-output-format.md
