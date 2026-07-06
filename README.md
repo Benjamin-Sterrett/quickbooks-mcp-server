@@ -54,7 +54,43 @@ After seeding, the server handles all future token rotations automatically. You 
 security find-generic-password -s claude-workflow -a quickbooks-refresh-token -w
 ```
 
-**If auth fails after a long period of inactivity** (token expired beyond the 100-day refresh window), re-authorize via the [OAuth 2.0 Playground](https://developer.intuit.com/app/developer/playground) and re-seed the Keychain with the new token.
+**Self-healing session:** the server builds its QuickBooks session lazily and retries on every tool call until one succeeds. If you re-seed the Keychain with a valid token while the server is running, it recovers on the next call — no restart required.
+
+### Re-authorizing after token expiry
+
+Intuit refresh tokens expire after ~100 days of inactivity. Once expired, the token endpoint returns `400 invalid_grant` and there is **no programmatic recovery** — you must re-consent in a browser. Runbook:
+
+1. Open the [OAuth 2.0 Playground](https://developer.intuit.com/app/developer/playground) (sign in to the Intuit Developer account).
+2. **Select workspace/app** = the production app; check the **`com.intuit.quickbooks.accounting`** scope.
+3. **Get authorization code** → authorize the correct company. Confirm the returned `realmId` matches `QUICKBOOKS_COMPANY_ID` in `.env`.
+4. **Get tokens** → copy the new `refreshToken`.
+5. Re-seed the Keychain:
+   ```bash
+   security add-generic-password -s claude-workflow -a quickbooks-refresh-token -w "NEW_REFRESH_TOKEN" -U
+   ```
+6. The running server picks it up on the next call (self-healing). If you use Claude Desktop, reconnecting the MCP server also works.
+
+**Interim fallback:** until the server is re-authed, pull financials (NOI, P&L) directly from the QuickBooks Online web UI via **Reports → export**.
+
+### Reports API modernization (Intuit, July 2026)
+
+Intuit migrated the Reports API (Group 1, incl. ProfitAndLoss) to a modernized backend, reaching 100% by 2026-07-16. **Verified:** the modernized ProfitAndLoss payload is structurally identical to the legacy one (same `Header`/`Columns`/`Rows`); the only difference is a `v3modernResponse: true` response header. Because this server returns the raw report JSON unchanged (passthrough), **no parser change is required** — it works before and after the cutover. Pass `testing_migration=true` to opt a request into the modernized backend early (do **not** pass it on `TaxSummary`, which is not yet modernized). ProfitAndLoss is currently the only report this server exposes.
+
+### `qb` terminal helper
+
+`qb_cli.py` is a direct client (no `mcp-cli` dependency):
+
+```bash
+qb Account                    # show the Account entity schema
+qb Account "Active = true"    # SELECT * FROM Account WHERE Active = true
+```
+
+Wire it into your shell (adjust the repo path):
+```bash
+qb() {
+  uv run --directory /path/to/quickbooks-mcp qb_cli.py "$@"
+}
+```
 
 ## Step 1. Install uv:
    - MacOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh
