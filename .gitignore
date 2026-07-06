@@ -21,3 +21,4 @@
 *-handoff.md
 
 # .debug-report.md is intentionally NOT ignored — it ships with fix/* PRs as evidence
+.task-progress.json

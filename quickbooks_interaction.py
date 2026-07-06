@@ -149,7 +149,17 @@ class QuickBooksSession:
 
             if response.status_code == 200:
                 return response.json()
+            elif response.status_code == 401:
+                # STILL auth-failing after a successful refresh — the session is
+                # genuinely dead. Raise (rather than returning an error string) so
+                # callers can invalidate the cached session and rebuild it from the
+                # Keychain instead of silently reusing a stale one.
+                message = f"Authentication failed after token refresh: {response.status_code} {response.text}"
+                print(message, file=sys.stderr)
+                raise Exception(message)
             else:
+                # Non-auth error after refresh (bad params, rate limit, etc.): the
+                # refreshed session is healthy — preserve the real error and keep it.
                 message = f"Error: {response.status_code} {response.text}"
                 print(message, file=sys.stderr)
                 return message

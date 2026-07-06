@@ -6,14 +6,40 @@ import sys
 import json
 from pathlib import Path
 
-# Initialize QuickBooks session with error handling
-quickbooks = None
+# QuickBooks session — lazily (re)initialized so the server self-heals after a
+# token expiry/rotation without a manual restart. A failed attempt (e.g. an
+# expired Keychain token) must NOT be cached as a permanent dead sentinel:
+# get_session() retries on every call until a session is established, then caches.
+_session = None
+
+
+def get_session():
+    """Return a live QuickBooksSession, building it on first use (and retrying
+    after a prior failure). Raises on auth failure — callers turn the exception
+    into a tool-level error message."""
+    global _session
+    if _session is None:
+        _session = QuickBooksSession()
+    return _session
+
+
+def reset_session():
+    """Drop the cached session so the next get_session() rebuilds from scratch,
+    re-reading the Keychain. Called after an auth failure so a reseeded/rotated
+    refresh token is picked up without a restart (a cached session holds its
+    refresh token in memory and would otherwise keep reusing the stale one)."""
+    global _session
+    _session = None
+
+
+# Best-effort startup probe: warms the session and logs a friendly status, but
+# never leaves a permanent None sentinel — get_session() retries on demand.
 try:
-    quickbooks = QuickBooksSession()
+    get_session()
     print("✓ QuickBooks session initialized successfully", file=sys.stderr)
 except Exception as e:
-    print(f"✗ Failed to initialize QuickBooks session: {e}", file=sys.stderr)
-    print("Please check your .env file and QuickBooks credentials", file=sys.stderr)
+    print(f"✗ QuickBooks session not ready at startup: {e}", file=sys.stderr)
+    print("Will retry automatically on the first tool call once credentials are valid.", file=sys.stderr)
 
 mcp = FastMCP("quickbooks")
 
@@ -46,13 +72,16 @@ def query_quickbooks(query: str) -> types.TextContent:
     Executes a SQL-like query on a QuickBooks entity.
     **IMPORTANT**: Before using this tool, you MUST first use the `get_quickbooks_entity_schema` tool to get the schema for the entity you want to query (e.g., 'Bill', 'Customer'). This will show you the available fields to use in your query's `select` and `where` clauses.
     """
-    if quickbooks is None:
-        return types.TextContent(type='text', text="Error: QuickBooks session not initialized. Please check your credentials and restart the server.")
-    
     try:
-        response = quickbooks.query(query)
+        session = get_session()
+    except Exception as e:
+        return types.TextContent(type='text', text=f"Error: QuickBooks session not initialized ({e}). Check credentials; the server will retry automatically on the next call.")
+
+    try:
+        response = session.query(query)
         return types.TextContent(type='text', text=str(response))
     except Exception as e:
+        reset_session()  # session may be stale (e.g. expired token) — rebuild on next call
         return types.TextContent(type='text', text=f"Error executing query: {e}")
 
 def register_all_apis():
@@ -106,9 +135,12 @@ def register_all_apis():
 def {method_name}(**kwargs) -> types.TextContent:
     \"\"\"{doc}\"\"\"
     
-    # Check if QuickBooks is initialized
-    if quickbooks is None:
-        return types.TextContent(type='text', text="Error: QuickBooks session not initialized. Please check your credentials and restart the server.")
+    # Lazily (re)acquire the session so the server self-heals after a token
+    # expiry/rotation without a restart.
+    try:
+        session = get_session()
+    except Exception as e:
+        return types.TextContent(type='text', text=f"Error: QuickBooks session not initialized ({{e}}). Check credentials; the server will retry automatically on the next call.")
     
     # Unwrap kwargs — Claude sends params nested inside a 'kwargs' key
     # Handle three formats: dict, JSON string, or URL-style query string
@@ -158,6 +190,13 @@ def {method_name}(**kwargs) -> types.TextContent:
                 elif p_info['location'] == 'query':
                     query_params[p_name] = kwargs[p_name]
 
+        # Forward Intuit's Reports API modernization flag even though it is not in
+        # the OpenAPI schema (HPH-1560): passing testing_migration=true opts a
+        # report into the modernized backend for early verification. Do NOT pass it
+        # on TaxSummary (not yet modernized).
+        if 'testing_migration' in kwargs:
+            query_params['testing_migration'] = kwargs['testing_migration']
+
         # The rest of kwargs are assumed to be the request body for POST/PUT/PATCH
         if api_method.lower() in ['post', 'put', 'patch']:
             body_keys = set(kwargs.keys()) - set(path_params.keys()) - set(query_params.keys())
@@ -171,7 +210,7 @@ def {method_name}(**kwargs) -> types.TextContent:
             except KeyError as e:
                 return types.TextContent(type='text', text=f"Error: Missing required path parameter {{e}} for route {{route}}")
 
-        response = quickbooks.call_route(
+        response = session.call_route(
             method_type=api_method,
             route=route,
             params=query_params,
@@ -181,6 +220,7 @@ def {method_name}(**kwargs) -> types.TextContent:
         print(f"Response from '{method_name}': {{response}}", file=sys.stderr)
         return types.TextContent(type='text', text=str(response))
     except Exception as e:
+        reset_session()  # session may be stale (e.g. expired token) — rebuild on next call
         error_msg = f"Error executing {method_name}: {{e}}"
         print(error_msg, file=sys.stderr)
         return types.TextContent(type='text', text=error_msg)
